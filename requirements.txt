@@ -1,0 +1,7 @@
+slack-sdk
+slack-bolt
+langchain_google_genai
+python-dotenv
+langchain
+langchain-community
+Flask
