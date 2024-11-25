@@ -1,11 +1,16 @@
 import os
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+from slack_sdk.signature import SignatureVerifier
 from slack_bolt.adapter.flask import SlackRequestHandler
 from slack_bolt import App
 from dotenv import find_dotenv, load_dotenv
-from flask import Flask, request
+from flask import Flask, request, abort
 from functions import draft_email
+import logging
+from functools import wraps
+import time
+import sys
 
 print(find_dotenv())
 
@@ -74,8 +79,38 @@ def handle_mentions(body, say):
     response = draft_email(text)
     say(response)
 
+signature_verifier = SignatureVerifier(SLACK_SIGNING_SECRET)
+
+def require_slack_verification(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not verify_slack_request():
+            abort(403)
+        return f(*args, **kwargs)
+
+    return decorated_function
+
+
+def verify_slack_request():
+    # Get the request headers
+    timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
+    signature = request.headers.get("X-Slack-Signature", "")
+
+    # Check if the timestamp is within five minutes of the current time
+    current_timestamp = int(time.time())
+    if abs(current_timestamp - int(timestamp)) > 60 * 5:
+        return False
+
+    # Verify the request signature
+    return signature_verifier.is_valid(
+        body=request.get_data().decode("utf-8"),
+        timestamp=timestamp,
+        signature=signature,
+    )
+
 
 @flask_app.route("/slack/events", methods=["POST"])
+@require_slack_verification
 def slack_events():
     """
     Route for handling Slack events.
@@ -88,6 +123,9 @@ def slack_events():
     return handler.handle(request)
 
 
+
+
+
 # Run the Flask app
 if __name__ == "__main__":
-    flask_app.run()
+    flask_app.run(host="0.0.0.0", port=8000)
